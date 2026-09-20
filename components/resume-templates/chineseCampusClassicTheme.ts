@@ -1,0 +1,58 @@
+export const CHINESE_CAMPUS_CLASSIC_THEME = {
+  page: {
+    widthPx: 794,
+    heightPx: 1123,
+    paddingTopPx: 46,
+    paddingBottomPx: 48,
+    paddingHorizontalPx: 56,
+    paddingTopPt: 34.5,
+    paddingBottomPt: 36,
+    paddingHorizontalPt: 42,
+  },
+  colors: {
+    ink: '#1E2938',
+    heading: '#254B70',
+    body: '#303A46',
+    muted: '#66778A',
+    accent: '#2F628F',
+    accentSoft: '#EDF4FA',
+    rule: '#C9D7E4',
+    paper: '#FFFFFF',
+    workspace: '#EEF1F4',
+  },
+  typography: {
+    family: 'Noto Sans SC',
+    namePx: 29.5,
+    namePt: 22,
+    sectionPx: 14.5,
+    sectionPt: 10.7,
+    bodyPx: 13.1,
+    bodyPt: 9.7,
+    metaPx: 11.9,
+    metaPt: 8.8,
+    lineHeight: 1.55,
+  },
+  spacing: {
+    sectionGapPx: 16,
+    sectionGapPt: 10.5,
+    itemGapPx: 11,
+    itemGapPt: 6.8,
+  },
+  labels: {
+    education: '教育经历',
+    experience: '实习经历',
+    projects: '项目经历',
+    campus: '校园经历',
+    awards: '获奖荣誉',
+    skills: '技能证书',
+  },
+} as const
+
+export const CHINESE_CAMPUS_SECTION_ORDER = [
+  'education',
+  'experience',
+  'projects',
+  'campus',
+  'awards',
+  'skills',
+] as const

@@ -3,12 +3,10 @@ services:
     name: resume-tailor-ai
     runtime: node
     plan: free
-    buildCommand: npm ci && npm run build
+    buildCommand: npm ci --include=dev && npm run build
     startCommand: npm run start
     healthCheckPath: /
     envVars:
-      - key: NODE_ENV
-        value: production
       - key: AI_API_KEY
         sync: false
       - key: AI_BASE_URL

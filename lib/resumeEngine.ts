@@ -3,9 +3,12 @@ import 'server-only'
 export type ResumeAIEngine = 'codex' | 'legacy'
 
 /**
- * Codex is the product default. Legacy remains an explicit environment-level
- * rollback switch during the migration and is never exposed in normal UI.
+ * Codex is the local product default. Render cannot reuse the developer's local
+ * Codex login, so hosted deployments fall back to the API-key based engine.
+ * Either environment can still be overridden explicitly.
  */
 export function getResumeAIEngine(): ResumeAIEngine {
-  return process.env.RESUME_AI_ENGINE === 'legacy' ? 'legacy' : 'codex'
+  if (process.env.RESUME_AI_ENGINE === 'codex') return 'codex'
+  if (process.env.RESUME_AI_ENGINE === 'legacy') return 'legacy'
+  return process.env.RENDER === 'true' ? 'legacy' : 'codex'
 }

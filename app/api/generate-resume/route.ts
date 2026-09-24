@@ -298,12 +298,20 @@ export async function POST(req: NextRequest) {
     }
 
     resume = trimComposedResume(resume, factMatches)
-    let pageCount = await countChinesePDFPages(resume)
+    // Rendering a Chinese PDF loads font and layout engines that can exhaust a
+    // 512 MB hosted instance during an AI request. The Composer budget remains
+    // the production guard; exact rendering still happens on PDF download.
+    const validateWithPDF = process.env.NODE_ENV !== 'production'
+    let pageCount = validateWithPDF
+      ? await countChinesePDFPages(resume)
+      : resume.composition?.fitsOnePage === false ? 2 : 1
     let validationBudget = resume.composition?.budget || 850
     for (let attempt = 0; pageCount > 1 && attempt < 4; attempt += 1) {
       validationBudget -= 70
       resume = trimComposedResume(resume, factMatches, validationBudget)
-      pageCount = await countChinesePDFPages(resume)
+      pageCount = validateWithPDF
+        ? await countChinesePDFPages(resume)
+        : resume.composition?.fitsOnePage === false ? 2 : 1
     }
     resume = { ...resume, composition: { ...resume.composition!, estimatedCost: estimateResumeCost(resume), fitsOnePage: pageCount === 1, suggestions: pageCount === 1 ? [] : ['当前高相关内容仍较多，建议继续精简。可优先删除相关性最低的项目或次要 bullet。'] } }
     return NextResponse.json({ resume })

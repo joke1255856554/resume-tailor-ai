@@ -10,5 +10,5 @@ export type ResumeAIEngine = 'codex' | 'legacy'
 export function getResumeAIEngine(): ResumeAIEngine {
   if (process.env.RESUME_AI_ENGINE === 'codex') return 'codex'
   if (process.env.RESUME_AI_ENGINE === 'legacy') return 'legacy'
-  return process.env.RENDER === 'true' ? 'legacy' : 'codex'
+  return process.env.NODE_ENV === 'production' ? 'legacy' : 'codex'
 }

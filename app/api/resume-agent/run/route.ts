@@ -4,6 +4,8 @@ import type { FactBank, GeneratedResume, ResumeAssistantMessage } from '@/lib/ty
 import { runCodexResumeAgent } from '@/lib/codex/resumeAgent'
 import { getResumeAIEngine } from '@/lib/resumeEngine'
 import { classifyGenerationError, logGenerationError, publicGenerationMessage, safeGenerationDiagnostic } from '@/lib/generationDiagnostics'
+import { POST as generateResume } from '@/app/api/generate-resume/route'
+import { POST as assistResume } from '@/app/api/resume-assistant/route'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -42,7 +44,17 @@ export async function POST(request: NextRequest) {
     const legacyBody = body.mode === 'generate'
       ? { factBank: body.factBank, jdText: body.jobDescription, polishStyle: body.polishStyle }
       : { factBank: body.factBank, jdText: body.jobDescription, requirements: body.currentResume?.requirements || [], messages: body.messages || [], userMessage: body.userMessage, conversationId: body.sessionId, messageId: `legacy-${Date.now()}`, clarificationRound: body.clarificationRound || 0, askedQuestionKeys: body.askedQuestionKeys || [] }
-    const legacyResponse = await fetch(new URL(endpoint, url), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(legacyBody), cache: 'no-store' })
+    // Invoke the existing route handler in-process. A server-side fetch back into
+    // the same Render instance doubles connection/memory pressure and can be
+    // terminated as an HTTP/2 protocol error on the free 512 MB service.
+    const legacyRequest = new NextRequest(new URL(endpoint, url), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(legacyBody),
+    })
+    const legacyResponse = body.mode === 'generate'
+      ? await generateResume(legacyRequest)
+      : await assistResume(legacyRequest)
     const data = await legacyResponse.json().catch(() => ({})) as Record<string, unknown>
     if (!legacyResponse.ok || data.error) return Response.json({ error: String(data.error || 'Legacy Pipeline 未能完成请求。') }, { status: 500 })
     const result = body.mode === 'generate'

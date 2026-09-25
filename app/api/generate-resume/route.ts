@@ -28,6 +28,7 @@ import {
 } from '@/lib/factEvidence'
 import { chooseRelevantFacts, estimateResumeCost, trimComposedResume } from '@/lib/resumeComposer'
 import { ChineseCampusClassicPDF } from '@/components/resume-templates/ChineseCampusClassicPDF'
+import { applySectionReorder, resolveSectionReorderIntent } from '@/lib/resumeSections'
 
 interface RawAnalysis extends Omit<JDReport, 'alreadyHave' | 'needToAdd'> {
   requirements?: JDRequirement[]
@@ -157,7 +158,14 @@ async function countChinesePDFPages(resume: GeneratedResume): Promise<number> {
 
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json() as { factBank?: FactBank; jdText?: string; polishStyle?: ResumePolishStyle }
+    const body = await req.json() as {
+      factBank?: FactBank
+      jdText?: string
+      polishStyle?: ResumePolishStyle
+      currentResume?: GeneratedResume | null
+      latestInstruction?: string
+      preferredFactIds?: string[]
+    }
     if (!body.factBank || !body.jdText?.trim()) return NextResponse.json({ error: '缺少经历库或岗位描述。' }, { status: 400 })
 
     const factBank = normalizeFactBank(body.factBank)
@@ -177,6 +185,14 @@ export async function POST(req: NextRequest) {
     const factMatches = buildDeterministicFactMatches(factBank, safeRequirements)
     const requirementGaps = detectRequirementGaps(safeRequirements, factMatches)
     const selection = chooseRelevantFacts(factBank, safeRequirements, factMatches)
+    // Facts explicitly collected in this job session are user-requested resume
+    // inputs. Keep them in the current generation even when their wording has
+    // little literal overlap with the JD (for example publication authorship).
+    const conversationFactIds = new Set((factBank.conversationFacts || []).map(fact => fact.id))
+    for (const id of (body.preferredFactIds || []).filter(id => conversationFactIds.has(id)).slice(-4)) {
+      if (!selection.conversationFactIds.includes(id)) selection.conversationFactIds.push(id)
+    }
+    selection.excludedFacts = selection.excludedFacts.filter(item => !selection.conversationFactIds.includes(item.factId))
     const selectedIds = new Set([...selection.experienceIds, ...selection.projectIds, ...selection.campusIds, ...selection.conversationFactIds])
 
     const selectedNarrativeFacts: Array<{ id: string; type: string; label: string; rawText: string; bullets: string[] }> = []
@@ -247,7 +263,21 @@ export async function POST(req: NextRequest) {
         conversationBullets.push(...rewritten.bullets)
         bulletEvidence.push(...rewritten.evidence.map(item => ({ ...item, bulletIndex: item.bulletIndex + offset })))
       })
-      if (conversationBullets.length) projects.unshift({ id: conversationProjectId, name: '个人 AIGC 创作实践', role: '个人实践', startDate: '', endDate: '', bullets: conversationBullets.slice(0, 2) })
+      if (conversationBullets.length) {
+        const sourceText = selection.conversationFactIds
+          .map(id => (factBank.conversationFacts || []).find(item => item.id === id)?.statement || '')
+          .join(' ')
+        const publication = /论文|作者|发表|期刊|会议/.test(sourceText)
+        const aigc = /codex|claude\s*code|qwen\s*agent|cursor|aigc|即梦|人工智能|\bai\b/i.test(sourceText)
+        projects.unshift({
+          id: conversationProjectId,
+          name: publication ? '科研与论文成果' : aigc ? '个人 AIGC 创作实践' : '补充经历',
+          role: publication ? '科研成果' : '个人实践',
+          startDate: '',
+          endDate: '',
+          bullets: conversationBullets.slice(0, 2),
+        })
+      }
     }
 
     const campusExperiences = selection.campusIds.flatMap(id => {
@@ -286,6 +316,7 @@ export async function POST(req: NextRequest) {
 
     let resume: GeneratedResume = {
       contact: factBank.contact, education: factBank.education, skills, experiences, projects, skillGroups, awards, campusExperiences, certificates,
+      sectionOrder: body.currentResume?.sectionOrder,
       requirements: safeRequirements, factMatches, requirementGaps, bulletEvidence, polishStyle,
       jdKeywordCoverage: {
         covered: coveredRequirements.map(requirement => requirement.requirement), missing: missingRequirements.map(requirement => requirement.requirement),
@@ -298,6 +329,8 @@ export async function POST(req: NextRequest) {
     }
 
     resume = trimComposedResume(resume, factMatches)
+    const reorderIntent = resolveSectionReorderIntent(body.latestInstruction || '')
+    if (reorderIntent) resume = applySectionReorder(resume, reorderIntent)
     // Rendering a Chinese PDF loads font and layout engines that can exhaust a
     // 512 MB hosted instance during an AI request. The Composer budget remains
     // the production guard; exact rendering still happens on PDF download.

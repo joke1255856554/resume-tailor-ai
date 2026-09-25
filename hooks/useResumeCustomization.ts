@@ -42,6 +42,7 @@ function categoryFromEvidence(text: string): ConversationFactCandidate['category
 function immediateEvidence(message: string, sessionId: string, messageId: string): NonNullable<FactBank['conversationFacts']> {
   const explicit = /(我|本人).{0,8}(用|使用|做过|负责|参与|开发|完成|开展|制作|撰写|调研|分析)/i.test(message)
     || /(用过|做过|开发过|制作过|完成过)/i.test(message)
+    || /第[一二三四五六七八九十\d]+篇.{0,12}第[一二三四五六七八九十\d]+作者/.test(message)
   if (!explicit || /(没有|没做过|不会|不要写|删掉|移除)/i.test(message)) return []
   const statement = message.trim().slice(0, 240)
   return [{
@@ -353,9 +354,11 @@ export function useResumeCustomization() {
 
   function requestMode(session: ResumeCustomizationSession, content: string): 'chat' | 'generate' | 'revise' {
     const stop = isStopClarificationIntent(content)
-    if (stop && !session.currentResume) return 'generate'
-    const revise = Boolean(session.currentResume && (/(删|移除|不要写|突出|太空|像\s*AI|改|重写|调整|压短|精简|顺序|夸张|放前面)/i.test(content)
-      || (/(codex|claude\s*code|qwen\s*agent|cursor|即梦|prd|用户调研|竞品分析|aigc)/i.test(content) && /(我|用|做过|开发|制作|完成|参与)/i.test(content))))
+    if (stop) return session.currentResume ? 'revise' : 'generate'
+    const explicitResumeEdit = /(删|移除|不要写|增加|新增|添加|补充|加上|写入|放进|突出|太空|像\s*AI|改|更新|重写|调整|压短|精简|顺序|夸张|放前面|换成|改成)/i.test(content)
+    const explicitNewEvidence = /(我|本人).{0,12}(用|使用|做过|负责|参与|开发|完成|开展|制作|撰写|调研|分析|获得|发表|担任)/i.test(content)
+      || /(用过|做过|开发过|制作过|完成过|发表过|第[一二三四五六七八九十\d]+作者)/i.test(content)
+    const revise = Boolean(session.currentResume && (explicitResumeEdit || explicitNewEvidence))
     return revise ? 'revise' : 'chat'
   }
 

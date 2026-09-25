@@ -15,6 +15,18 @@ const globalRuns = globalThis as typeof globalThis & { resumeAgentActiveRuns?: M
 const activeRuns = globalRuns.resumeAgentActiveRuns || new Map<string, string>()
 globalRuns.resumeAgentActiveRuns = activeRuns
 
+function factBankWithSessionEvidence(
+  factBank: FactBank | undefined,
+  sessionEvidence: FactBank['conversationFacts'] = []
+): FactBank | undefined {
+  if (!factBank) return undefined
+  const facts = new Map((factBank.conversationFacts || []).map(fact => [fact.id, fact]))
+  for (const fact of sessionEvidence || []) {
+    if (fact?.id && fact.statement?.trim()) facts.set(fact.id, fact)
+  }
+  return { ...factBank, conversationFacts: [...facts.values()] }
+}
+
 /** The production Resume Agent endpoint. It intentionally exposes only safe UI events. */
 export async function POST(request: NextRequest) {
   const body = await request.json() as {
@@ -40,10 +52,23 @@ export async function POST(request: NextRequest) {
   // Development rollback only. Normal UI never exposes this engine choice.
   if (getResumeAIEngine() === 'legacy') {
     const url = new URL(request.url)
-    const endpoint = body.mode === 'generate' ? '/api/generate-resume' : '/api/resume-assistant'
-    const legacyBody = body.mode === 'generate'
-      ? { factBank: body.factBank, jdText: body.jobDescription, polishStyle: body.polishStyle }
-      : { factBank: body.factBank, jdText: body.jobDescription, requirements: body.currentResume?.requirements || [], messages: body.messages || [], userMessage: body.userMessage, conversationId: body.sessionId, messageId: `legacy-${Date.now()}`, clarificationRound: body.clarificationRound || 0, askedQuestionKeys: body.askedQuestionKeys || [] }
+    const shouldGenerate = body.mode === 'generate' || body.mode === 'revise'
+    const endpoint = shouldGenerate ? '/api/generate-resume' : '/api/resume-assistant'
+    // Session evidence is valid for the current resume immediately, even before
+    // the user chooses to save it permanently to the Fact Bank. Previously the
+    // hosted fallback discarded this array, so "直接生成" silently used the old
+    // profile and revisions were routed to the chat-only endpoint.
+    const effectiveFactBank = factBankWithSessionEvidence(body.factBank, body.sessionEvidence)
+    const legacyBody = shouldGenerate
+      ? {
+          factBank: effectiveFactBank,
+          jdText: body.jobDescription,
+          polishStyle: body.polishStyle,
+          currentResume: body.currentResume,
+          latestInstruction: body.userMessage,
+          preferredFactIds: (body.sessionEvidence || []).map(fact => fact.id),
+        }
+      : { factBank: effectiveFactBank, jdText: body.jobDescription, requirements: body.currentResume?.requirements || [], messages: body.messages || [], userMessage: body.userMessage, conversationId: body.sessionId, messageId: `legacy-${Date.now()}`, clarificationRound: body.clarificationRound || 0, askedQuestionKeys: body.askedQuestionKeys || [] }
     // Invoke the existing route handler in-process. A server-side fetch back into
     // the same Render instance doubles connection/memory pressure and can be
     // terminated as an HTTP/2 protocol error on the free 512 MB service.
@@ -52,13 +77,21 @@ export async function POST(request: NextRequest) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(legacyBody),
     })
-    const legacyResponse = body.mode === 'generate'
+    const legacyResponse = shouldGenerate
       ? await generateResume(legacyRequest)
       : await assistResume(legacyRequest)
     const data = await legacyResponse.json().catch(() => ({})) as Record<string, unknown>
     if (!legacyResponse.ok || data.error) return Response.json({ error: String(data.error || 'Legacy Pipeline 未能完成请求。') }, { status: 500 })
-    const result = body.mode === 'generate'
-      ? { threadId: '', action: 'resume_generated', assistantMessage: '已使用 Legacy Pipeline 生成简历。', factCandidates: [], resume: data.resume, changeSummary: ['Legacy Pipeline fallback'], layoutAdjustment: 'none' }
+    const result = shouldGenerate
+      ? {
+          threadId: '',
+          action: body.mode === 'revise' ? 'resume_updated' : 'resume_generated',
+          assistantMessage: body.mode === 'revise' ? '已根据本轮补充更新简历。' : '已结合当前会话事实生成简历。',
+          factCandidates: [],
+          resume: data.resume,
+          changeSummary: [body.mode === 'revise' ? '已结合最新补充事实重新整理当前简历' : '已采用当前会话中明确提供的事实'],
+          layoutAdjustment: 'none',
+        }
       : { threadId: '', action: data.assistantPhase === 'ready' ? 'resume_updated' : 'ask', assistantMessage: String(data.assistantMessage || 'Legacy Pipeline 已处理本轮信息。'), factCandidates: data.factCandidates || [], resume: null, changeSummary: [], layoutAdjustment: 'none' }
     return new Response(`${JSON.stringify({ type: 'result', result })}\n`, { headers: { 'Content-Type': 'application/x-ndjson; charset=utf-8', 'Cache-Control': 'no-store' } })
   }
